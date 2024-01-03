@@ -1,0 +1,16 @@
+{
+	"manifest_version": 3,
+	"name": "Image Grabber",
+	"version": "0.0.1",
+	"description": "Effortlessly capture images from any website with our Chrome extension, eliminating the need for complex inspection processes.",
+	"action": {
+		"default_popup": "index.html"
+	},
+	"permissions": ["scripting"],
+	"host_permissions": ["http://*/*", "https://*/*"],
+	"icons": {
+		"32": "images/icon32.png",
+		"48": "images/icon48.png",
+		"128": "images/icon128.png"
+	}
+}
