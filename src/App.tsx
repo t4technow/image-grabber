@@ -26,7 +26,8 @@ function App() {
 			},
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			(result: any) => {
-				setImages(result[0].result);
+				const uniqueImages = Array.from(new Set(result[0].result));
+				setImages(uniqueImages as string[]);
 				setLoading(false);
 			}
 		);
@@ -85,7 +86,7 @@ function App() {
 				);
 				const originalImageName = fileNameMatch
 					? fileNameMatch[1]
-					: `Image ${index + 1}`;
+					: `Image ${index + 1}.jpg`;
 
 				zip.file(originalImageName, blob);
 			})
