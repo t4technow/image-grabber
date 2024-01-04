@@ -7,14 +7,22 @@ type imageArray = {
 	url: string;
 	dimensions: { width: number; height: number };
 	extension: string;
+	tag: string; // Add a tag property to identify the type of element
 }[];
+
+enum DisplayType {
+	Images = "Images",
+	SVGIcons = "SVG Icons",
+}
 
 function App() {
 	const [images, setImages] = useState<imageArray>([]);
 	const [selectedImages, setSelectedImages] = useState<string[]>([]);
 	const [loading, setLoading] = useState<boolean>(true);
-
 	const [siteName, setSiteName] = useState<string>("selected images");
+	const [displayType, setDisplayType] = useState<DisplayType>(
+		DisplayType.Images
+	);
 
 	const fetchImages = async () => {
 		const [tab] = await chrome.tabs.query({ active: true });
@@ -23,21 +31,43 @@ function App() {
 			{
 				target: { tabId: tab.id! },
 				func: () => {
-					const imageElements = document.querySelectorAll("img");
-					const imageInfo = Array.from(imageElements).map((img) => {
-						const fileNameMatch = img.src.match(
-							// eslint-disable-next-line no-useless-escape
-							/\/([^\/?]+(\.[a-z]+)(\?.+)?)$/i
-						);
-						const extension = fileNameMatch ? fileNameMatch[2] : "unknown";
+					const imageElements = document.querySelectorAll("img, svg");
+					const imageInfo = Array.from(imageElements).map((element) => {
+						let url, dimensions, extension;
+
+						if (element instanceof HTMLImageElement) {
+							url = element.src;
+							dimensions = {
+								width: element.naturalWidth,
+								height: element.naturalHeight,
+							};
+							const fileNameMatch = url.match(
+								// eslint-disable-next-line no-useless-escape
+								/\/([^\/?]+(\.[a-z]+)(\?.+)?)$/i
+							);
+							extension = fileNameMatch ? fileNameMatch[2] : "jpg";
+						} else if (element.tagName.toLowerCase() === "svg") {
+							// Handle SVG elements
+							url = element.outerHTML;
+							const svgParser = new DOMParser();
+							const svgDocument = svgParser.parseFromString(
+								url,
+								"image/svg+xml"
+							);
+							const svgElement = svgDocument.querySelector("svg");
+
+							dimensions = {
+								width: svgElement ? svgElement?.width?.baseVal?.value : 0,
+								height: svgElement ? svgElement?.height?.baseVal?.value : 0,
+							};
+							extension = "svg";
+						}
 
 						return {
-							url: img.src,
-							dimensions: {
-								width: img.naturalWidth,
-								height: img.naturalHeight,
-							},
-							extension: extension,
+							url,
+							dimensions,
+							extension,
+							tag: element.tagName.toLowerCase(),
 						};
 					});
 
@@ -47,6 +77,8 @@ function App() {
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			(result: any) => {
 				const uniqueImages = Array.from(new Set(result[0].result));
+
+				console.log(uniqueImages);
 				setImages(uniqueImages as imageArray);
 				setLoading(false);
 			}
@@ -75,7 +107,6 @@ function App() {
 	useEffect(() => {
 		fetchImages();
 		fetchSiteName();
-		setLoading(false);
 	}, []);
 
 	const toggleImageSelection = (imageUrl: string) => {
@@ -95,20 +126,27 @@ function App() {
 
 		// Use Promise.all to wait for all images to be fetched and added to the ZIP
 		await Promise.all(
-			selectedImages.map(async (imageUrl, index) => {
-				const response = await fetch(imageUrl);
-				const blob = await response.blob();
+			selectedImages.map(async (image, index) => {
+				if (image.startsWith("<svg")) {
+					// Handle SVG content differently
+					const svgBlob = new Blob([image], { type: "image/svg+xml" });
+					zip.file(`SVG_${index + 1}.svg`, svgBlob);
+				} else {
+					// Handle regular images
+					const response = await fetch(image);
+					const blob = await response.blob();
 
-				// Extract the original image name from the URL based on known image extensions
-				const fileNameMatch = imageUrl.match(
-					// eslint-disable-next-line no-useless-escape
-					/\/([^\/?]+(?:\.(jpg|jpeg|png|gif|bmp|webp|svg|tiff|avif)))/i
-				);
-				const originalImageName = fileNameMatch
-					? fileNameMatch[1]
-					: `Image ${index + 1}.jpg`;
+					// Extract the original image name from the URL based on known image extensions
+					const fileNameMatch = image.match(
+						// eslint-disable-next-line no-useless-escape
+						/\/([^\/?]+(?:\.(jpg|jpeg|png|gif|bmp|webp|svg|tiff|avif)))/i
+					);
+					const originalImageName = fileNameMatch
+						? fileNameMatch[1]
+						: `Image_${index + 1}.jpg`;
 
-				zip.file(originalImageName, blob);
+					zip.file(originalImageName, blob);
+				}
 			})
 		);
 
@@ -116,7 +154,7 @@ function App() {
 		const content = await zip.generateAsync({ type: "blob" });
 
 		// Create a download link and trigger the download
-		const zipFileName = `${siteName} - t4technow image grabber.zip`;
+		const zipFileName = `${siteName} - image grabber.zip`;
 		const link = document.createElement("a");
 		link.href = URL.createObjectURL(content);
 		link.download = zipFileName;
@@ -124,6 +162,23 @@ function App() {
 		link.click();
 		document.body.removeChild(link);
 		setSelectedImages([]);
+	};
+
+	const filterImagesByType = (imageType: DisplayType) => {
+		switch (imageType) {
+			case DisplayType.Images:
+				return images.filter(
+					(image) => image.tag === "img" && image.extension !== "svg"
+				);
+			case DisplayType.SVGIcons:
+				return images.filter(
+					(image) =>
+						image.tag === "svg" ||
+						(image.tag === "img" && image.extension === "svg")
+				);
+			default:
+				return [];
+		}
 	};
 
 	const breakpointColumnsObj = {
@@ -134,8 +189,23 @@ function App() {
 
 	return (
 		<>
+			<div className="tabs">
+				<button
+					onClick={() => setDisplayType(DisplayType.Images)}
+					className={displayType === DisplayType.Images ? "active" : ""}
+				>
+					Images
+				</button>
+				<button
+					onClick={() => setDisplayType(DisplayType.SVGIcons)}
+					className={displayType === DisplayType.SVGIcons ? "active" : ""}
+				>
+					SVG Icons
+				</button>
+			</div>
+			<div className="tab-offset" />
 			{loading ? (
-				<h2> loading... </h2>
+				<h2>Loading...</h2>
 			) : (
 				<>
 					<Masonry
@@ -143,33 +213,46 @@ function App() {
 						className="image-grid"
 						columnClassName="image-grid_column"
 					>
-						{images.map((image, indx) => (
-							<div
-								key={indx}
-								className={`image-item ${
-									selectedImages.includes(image.url) ? "selected" : ""
-								}`}
-							>
-								<div className="tags d-flex">
-									<span className="tag">{`${image.dimensions.width} x ${image.dimensions.height}`}</span>
-									<span className="tag">{image.extension}</span>
-								</div>
-								<img
-									src={image.url}
-									alt={`Image ${indx + 1}`}
-									onClick={() => toggleImageSelection(image.url)}
-								/>
-								{selectedImages.includes(image.url) && (
-									<div
-										className="overlay"
-										onClick={() => toggleImageSelection(image.url)}
-									>
-										<span>&#10003;</span>
+						{filterImagesByType(displayType).length > 0 &&
+							filterImagesByType(displayType).map((image, indx) => (
+								<div
+									key={indx}
+									className={`image-item ${
+										selectedImages.includes(image.url) ? "selected" : ""
+									}`}
+								>
+									<div className="tags d-flex">
+										{!image.url.startsWith("<svg") && (
+											<span className="tag">{`${image.dimensions.width} x ${image.dimensions.height}`}</span>
+										)}
+										<span className="tag">{image.extension}</span>
 									</div>
-								)}
-							</div>
-						))}
+									{image.url.startsWith("<svg") ? (
+										<div
+											dangerouslySetInnerHTML={{ __html: image.url }}
+											onClick={() => toggleImageSelection(image.url)}
+										/>
+									) : (
+										<img
+											src={image.url}
+											alt={`Image ${indx + 1}`}
+											onClick={() => toggleImageSelection(image.url)}
+										/>
+									)}
+									{selectedImages.includes(image.url) && (
+										<div
+											className="overlay"
+											onClick={() => toggleImageSelection(image.url)}
+										>
+											<span>&#10003;</span>
+										</div>
+									)}
+								</div>
+							))}
 					</Masonry>
+					{filterImagesByType(displayType).length <= 0 && (
+						<div className="empty">No {displayType} found</div>
+					)}
 					<div className="download-button-container">
 						<button
 							onClick={downloadSelectedImages}
