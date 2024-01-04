@@ -7,14 +7,22 @@ type imageArray = {
 	url: string;
 	dimensions: { width: number; height: number };
 	extension: string;
+	tag: string; // Add a tag property to identify the type of element
 }[];
+
+enum DisplayType {
+	Images = "Images",
+	SVGIcons = "SVG Icons",
+}
 
 function App() {
 	const [images, setImages] = useState<imageArray>([]);
 	const [selectedImages, setSelectedImages] = useState<string[]>([]);
 	const [loading, setLoading] = useState<boolean>(true);
-
 	const [siteName, setSiteName] = useState<string>("selected images");
+	const [displayType, setDisplayType] = useState<DisplayType>(
+		DisplayType.Images
+	);
 
 	const fetchImages = async () => {
 		const [tab] = await chrome.tabs.query({ active: true });
@@ -37,7 +45,7 @@ function App() {
 								// eslint-disable-next-line no-useless-escape
 								/\/([^\/?]+(\.[a-z]+)(\?.+)?)$/i
 							);
-							extension = fileNameMatch ? fileNameMatch[2] : "unknown";
+							extension = fileNameMatch ? fileNameMatch[2] : "jpg";
 						} else if (element.tagName.toLowerCase() === "svg") {
 							// Handle SVG elements
 							url = element.outerHTML;
@@ -59,6 +67,7 @@ function App() {
 							url,
 							dimensions,
 							extension,
+							tag: element.tagName.toLowerCase(),
 						};
 					});
 
@@ -155,6 +164,23 @@ function App() {
 		setSelectedImages([]);
 	};
 
+	const filterImagesByType = (imageType: DisplayType) => {
+		switch (imageType) {
+			case DisplayType.Images:
+				return images.filter(
+					(image) => image.tag === "img" && image.extension !== "svg"
+				);
+			case DisplayType.SVGIcons:
+				return images.filter(
+					(image) =>
+						image.tag === "svg" ||
+						(image.tag === "img" && image.extension === "svg")
+				);
+			default:
+				return [];
+		}
+	};
+
 	const breakpointColumnsObj = {
 		default: 3,
 		1100: 3,
@@ -163,6 +189,21 @@ function App() {
 
 	return (
 		<>
+			<div className="tabs">
+				<button
+					onClick={() => setDisplayType(DisplayType.Images)}
+					className={displayType === DisplayType.Images ? "active" : ""}
+				>
+					Images
+				</button>
+				<button
+					onClick={() => setDisplayType(DisplayType.SVGIcons)}
+					className={displayType === DisplayType.SVGIcons ? "active" : ""}
+				>
+					SVG Icons
+				</button>
+			</div>
+			<div className="tab-offset" />
 			{loading ? (
 				<h2>Loading...</h2>
 			) : (
@@ -172,42 +213,46 @@ function App() {
 						className="image-grid"
 						columnClassName="image-grid_column"
 					>
-						{images.map((image, indx) => (
-							<div
-								key={indx}
-								className={`image-item ${
-									selectedImages.includes(image.url) ? "selected" : ""
-								}`}
-							>
-								<div className="tags d-flex">
-									{!image.url.startsWith("<svg") && (
-										<span className="tag">{`${image.dimensions.width} x ${image.dimensions.height}`}</span>
-									)}
-									<span className="tag">{image.extension}</span>
-								</div>
-								{image.url.startsWith("<svg") ? (
-									<div
-										dangerouslySetInnerHTML={{ __html: image.url }}
-										onClick={() => toggleImageSelection(image.url)}
-									/>
-								) : (
-									<img
-										src={image.url}
-										alt={`Image ${indx + 1}`}
-										onClick={() => toggleImageSelection(image.url)}
-									/>
-								)}
-								{selectedImages.includes(image.url) && (
-									<div
-										className="overlay"
-										onClick={() => toggleImageSelection(image.url)}
-									>
-										<span>&#10003;</span>
+						{filterImagesByType(displayType).length > 0 &&
+							filterImagesByType(displayType).map((image, indx) => (
+								<div
+									key={indx}
+									className={`image-item ${
+										selectedImages.includes(image.url) ? "selected" : ""
+									}`}
+								>
+									<div className="tags d-flex">
+										{!image.url.startsWith("<svg") && (
+											<span className="tag">{`${image.dimensions.width} x ${image.dimensions.height}`}</span>
+										)}
+										<span className="tag">{image.extension}</span>
 									</div>
-								)}
-							</div>
-						))}
+									{image.url.startsWith("<svg") ? (
+										<div
+											dangerouslySetInnerHTML={{ __html: image.url }}
+											onClick={() => toggleImageSelection(image.url)}
+										/>
+									) : (
+										<img
+											src={image.url}
+											alt={`Image ${indx + 1}`}
+											onClick={() => toggleImageSelection(image.url)}
+										/>
+									)}
+									{selectedImages.includes(image.url) && (
+										<div
+											className="overlay"
+											onClick={() => toggleImageSelection(image.url)}
+										>
+											<span>&#10003;</span>
+										</div>
+									)}
+								</div>
+							))}
 					</Masonry>
+					{filterImagesByType(displayType).length <= 0 && (
+						<div className="empty">No {displayType} found</div>
+					)}
 					<div className="download-button-container">
 						<button
 							onClick={downloadSelectedImages}

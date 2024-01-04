@@ -45,6 +45,7 @@
 	display: flex;
 	gap: 0.5rem;
 	width: auto;
+	min-height: 200px;
 }
 
 .image-grid_column {
@@ -71,6 +72,7 @@
 	left: 0;
 	background: #242424;
 	right: 0;
+	box-shadow: 0 -2px 12px 1px #1a1a1a;
 }
 
 .download-button-container button {
@@ -122,4 +124,34 @@
 .image-grid svg {
 	height: 100%;
 	width: 100%;
+}
+
+.tabs {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	padding: 0.5rem 1rem;
+	background: #242424;
+	z-index: 2;
+	display: flex;
+	gap: 1rem;
+	box-shadow: 0 0px 12px 1px #1a1a1a;
+}
+
+.tabs button {
+	flex: 1;
+}
+
+.tab-offset {
+	height: 48px;
+}
+
+.empty {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	font-size: 2rem;
+	font-weight: 900;
 }
