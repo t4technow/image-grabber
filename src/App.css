@@ -118,3 +118,8 @@
 	justify-content: center;
 	backdrop-filter: blur(4px);
 }
+
+.image-grid svg {
+	height: 100%;
+	width: 100%;
+}
