@@ -3,8 +3,14 @@ import Masonry from "react-masonry-css";
 import JSZip from "jszip";
 import "./App.css";
 
+type imageArray = {
+	url: string;
+	dimensions: { width: number; height: number };
+	extension: string;
+}[];
+
 function App() {
-	const [images, setImages] = useState<string[]>([]);
+	const [images, setImages] = useState<imageArray>([]);
 	const [selectedImages, setSelectedImages] = useState<string[]>([]);
 	const [loading, setLoading] = useState<boolean>(true);
 
@@ -18,16 +24,30 @@ function App() {
 				target: { tabId: tab.id! },
 				func: () => {
 					const imageElements = document.querySelectorAll("img");
-					const imageUrls = Array.from(imageElements).map((img) => img.src);
-					// setSiteName(window.location.hostname); // Get the current site's domain
+					const imageInfo = Array.from(imageElements).map((img) => {
+						const fileNameMatch = img.src.match(
+							// eslint-disable-next-line no-useless-escape
+							/\/([^\/?]+(\.[a-z]+)(\?.+)?)$/i
+						);
+						const extension = fileNameMatch ? fileNameMatch[2] : "unknown";
 
-					return imageUrls;
+						return {
+							url: img.src,
+							dimensions: {
+								width: img.naturalWidth,
+								height: img.naturalHeight,
+							},
+							extension: extension,
+						};
+					});
+
+					return imageInfo;
 				},
 			},
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			(result: any) => {
 				const uniqueImages = Array.from(new Set(result[0].result));
-				setImages(uniqueImages as string[]);
+				setImages(uniqueImages as imageArray);
 				setLoading(false);
 			}
 		);
@@ -103,6 +123,7 @@ function App() {
 		document.body.appendChild(link);
 		link.click();
 		document.body.removeChild(link);
+		setSelectedImages([]);
 	};
 
 	const breakpointColumnsObj = {
@@ -126,18 +147,22 @@ function App() {
 							<div
 								key={indx}
 								className={`image-item ${
-									selectedImages.includes(image) ? "selected" : ""
+									selectedImages.includes(image.url) ? "selected" : ""
 								}`}
 							>
+								<div className="tags d-flex">
+									<span className="tag">{`${image.dimensions.width} x ${image.dimensions.height}`}</span>
+									<span className="tag">{image.extension}</span>
+								</div>
 								<img
-									src={image}
+									src={image.url}
 									alt={`Image ${indx + 1}`}
-									onClick={() => toggleImageSelection(image)}
+									onClick={() => toggleImageSelection(image.url)}
 								/>
-								{selectedImages.includes(image) && (
+								{selectedImages.includes(image.url) && (
 									<div
 										className="overlay"
-										onClick={() => toggleImageSelection(image)}
+										onClick={() => toggleImageSelection(image.url)}
 									>
 										<span>&#10003;</span>
 									</div>
