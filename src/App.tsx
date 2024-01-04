@@ -1,14 +1,17 @@
+/* eslint-disable no-useless-escape */
 import { useEffect, useState } from "react";
 import Masonry from "react-masonry-css";
 import JSZip from "jszip";
 import "./App.css";
 
-type imageArray = {
+type ImageInfo = {
+	id: string;
 	url: string;
 	dimensions: { width: number; height: number };
 	extension: string;
-	tag: string; // Add a tag property to identify the type of element
-}[];
+	tag: string;
+	srcset?: string;
+};
 
 enum DisplayType {
 	Images = "Images",
@@ -16,7 +19,7 @@ enum DisplayType {
 }
 
 function App() {
-	const [images, setImages] = useState<imageArray>([]);
+	const [images, setImages] = useState<ImageInfo[]>([]);
 	const [selectedImages, setSelectedImages] = useState<string[]>([]);
 	const [loading, setLoading] = useState<boolean>(true);
 	const [siteName, setSiteName] = useState<string>("selected images");
@@ -24,6 +27,7 @@ function App() {
 		DisplayType.Images
 	);
 
+	// let baseUrl = "/";
 	const fetchImages = async () => {
 		const [tab] = await chrome.tabs.query({ active: true });
 
@@ -33,22 +37,25 @@ function App() {
 				func: () => {
 					const imageElements = document.querySelectorAll("img, svg");
 					const imageInfo = Array.from(imageElements).map((element) => {
-						let url, dimensions, extension;
+						let url, dimensions, extension, id, srcset;
 
 						if (element instanceof HTMLImageElement) {
+							const width = element.naturalWidth;
+							const height = element.naturalHeight;
+							id = `${element.src}-${width}x${height}`;
+
 							url = element.src;
 							dimensions = {
-								width: element.naturalWidth,
-								height: element.naturalHeight,
+								width,
+								height,
 							};
-							const fileNameMatch = url.match(
-								// eslint-disable-next-line no-useless-escape
-								/\/([^\/?]+(\.[a-z]+)(\?.+)?)$/i
-							);
+							const fileNameMatch = url.match(/\/([^\/?]+(\.[a-z]+)(\?.+)?)$/i);
 							extension = fileNameMatch ? fileNameMatch[2] : "jpg";
+
+							// Check if srcset attribute exists
+							srcset = element.srcset;
 						} else if (element.tagName.toLowerCase() === "svg") {
-							// Handle SVG elements
-							url = element.outerHTML;
+							id = url = element.outerHTML;
 							const svgParser = new DOMParser();
 							const svgDocument = svgParser.parseFromString(
 								url,
@@ -64,10 +71,12 @@ function App() {
 						}
 
 						return {
+							id,
 							url,
 							dimensions,
 							extension,
 							tag: element.tagName.toLowerCase(),
+							srcset,
 						};
 					});
 
@@ -79,7 +88,7 @@ function App() {
 				const uniqueImages = Array.from(new Set(result[0].result));
 
 				console.log(uniqueImages);
-				setImages(uniqueImages as imageArray);
+				setImages(uniqueImages as ImageInfo[]);
 				setLoading(false);
 			}
 		);
@@ -92,8 +101,8 @@ function App() {
 			{
 				target: { tabId: tab.id! },
 				func: () => {
-					const hostName = window.location.hostname; // Get the current site's domain
-
+					// baseUrl = window.location.protocol + "//" + window.location.host;
+					const hostName = window.location.hostname;
 					return hostName;
 				},
 			},
@@ -109,14 +118,12 @@ function App() {
 		fetchSiteName();
 	}, []);
 
-	const toggleImageSelection = (imageUrl: string) => {
+	const toggleImageSelection = (imageId: string) => {
 		setSelectedImages((prevSelectedImages) => {
-			if (prevSelectedImages.includes(imageUrl)) {
-				// Image is already selected, remove it
-				return prevSelectedImages.filter((img) => img !== imageUrl);
+			if (prevSelectedImages.includes(imageId)) {
+				return prevSelectedImages.filter((img) => img !== imageId);
 			} else {
-				// Image is not selected, add it
-				return [...prevSelectedImages, imageUrl];
+				return [...prevSelectedImages, imageId];
 			}
 		});
 	};
@@ -124,36 +131,69 @@ function App() {
 	const downloadSelectedImages = async () => {
 		const zip = new JSZip();
 
-		// Use Promise.all to wait for all images to be fetched and added to the ZIP
 		await Promise.all(
 			selectedImages.map(async (image, index) => {
-				if (image.startsWith("<svg")) {
-					// Handle SVG content differently
-					const svgBlob = new Blob([image], { type: "image/svg+xml" });
-					zip.file(`SVG_${index + 1}.svg`, svgBlob);
-				} else {
-					// Handle regular images
-					const response = await fetch(image);
-					const blob = await response.blob();
+				const selectedImage = images.find((img) => img.id === image);
 
-					// Extract the original image name from the URL based on known image extensions
-					const fileNameMatch = image.match(
-						// eslint-disable-next-line no-useless-escape
-						/\/([^\/?]+(?:\.(jpg|jpeg|png|gif|bmp|webp|svg|tiff|avif)))/i
+				console.log(selectedImage, "mmmmmmmmmmm");
+
+				if (selectedImage && selectedImage.srcset) {
+					const srcsetUrls = selectedImage.srcset.split(", ");
+					let closestSize = findClosestSize(
+						selectedImage.dimensions.width,
+						srcsetUrls
 					);
-					const originalImageName = fileNameMatch
-						? fileNameMatch[1]
-						: `Image_${index + 1}.jpg`;
 
-					zip.file(originalImageName, blob);
+					if (!closestSize.startsWith("http")) {
+						// Handle different cases for URLs in srcset
+						const baseImageUrl = selectedImage.url; // The base image URL
+						const baseUrlMatch = baseImageUrl.match(/^(https?:\/\/[^\/]+)/);
+						const baseUrl = baseUrlMatch ? baseUrlMatch[1] : ""; // Extract base URL
+
+						if (closestSize.startsWith("//")) {
+							// Handle protocol-relative URLs
+							closestSize = `http:${closestSize}`;
+						} else if (closestSize.startsWith("/")) {
+							// Handle path-relative URLs
+							closestSize = `${baseUrl}${closestSize}`;
+						} else if (closestSize.startsWith("data:")) {
+							// Handle data URLs
+							const response = await fetch(baseImageUrl);
+							const blob = await response.blob();
+							zip.file(`Image_${index + 1}.${selectedImage.extension}`, blob);
+							return; // Skip the rest of the loop for data URLs
+						} else {
+							// Handle other cases (e.g., different protocols, custom schemes)
+							// You may need to add more cases based on your specific requirements
+							// Ensure you handle different URL formats appropriately
+							console.log("error");
+						}
+					}
+
+					const response = await fetch(closestSize);
+					const blob = await response.blob();
+					zip.file(
+						`Image_${selectedImage.dimensions.width}x${selectedImage.dimensions.height}${selectedImage.extension}`,
+						blob
+					);
+				} else if (selectedImage && selectedImage.url.startsWith("<svg")) {
+					const svgBlob = new Blob([selectedImage.url], {
+						type: "image/svg+xml",
+					});
+					zip.file(`SVG_${index + 1}.svg`, svgBlob);
+				} else if (selectedImage) {
+					const response = await fetch(selectedImage.url);
+					const blob = await response.blob();
+					zip.file(
+						`Image_${selectedImage.dimensions.width}x${selectedImage.dimensions.height}${selectedImage.extension}`,
+						blob
+					);
 				}
 			})
 		);
 
-		// Generate the ZIP file after all images are added
 		const content = await zip.generateAsync({ type: "blob" });
 
-		// Create a download link and trigger the download
 		const zipFileName = `${siteName} - image grabber.zip`;
 		const link = document.createElement("a");
 		link.href = URL.createObjectURL(content);
@@ -162,6 +202,28 @@ function App() {
 		link.click();
 		document.body.removeChild(link);
 		setSelectedImages([]);
+	};
+
+	const findClosestSize = (selectedWidth: number, srcsetUrls: string[]) => {
+		const sizes = srcsetUrls.map((url) => {
+			const sizeMatch = url.match(/(\d+)w/);
+			return sizeMatch ? parseInt(sizeMatch[1]) : 0;
+		});
+
+		console.log(sizes, "sizes");
+
+		const closestSize = sizes.reduce((prev, curr) => {
+			return Math.abs(curr - selectedWidth) < Math.abs(prev - selectedWidth)
+				? curr
+				: prev;
+		});
+
+		console.log(closestSize, "closest size");
+
+		console.log(srcsetUrls, "set");
+
+		const closestSizeIndex = sizes.indexOf(closestSize);
+		return srcsetUrls[closestSizeIndex].split(" ")[0];
 	};
 
 	const filterImagesByType = (imageType: DisplayType) => {
@@ -218,7 +280,7 @@ function App() {
 								<div
 									key={indx}
 									className={`image-item ${
-										selectedImages.includes(image.url) ? "selected" : ""
+										selectedImages.includes(image.id) ? "selected" : ""
 									}`}
 								>
 									<div className="tags d-flex">
@@ -230,19 +292,19 @@ function App() {
 									{image.url.startsWith("<svg") ? (
 										<div
 											dangerouslySetInnerHTML={{ __html: image.url }}
-											onClick={() => toggleImageSelection(image.url)}
+											onClick={() => toggleImageSelection(image.id)}
 										/>
 									) : (
 										<img
 											src={image.url}
 											alt={`Image ${indx + 1}`}
-											onClick={() => toggleImageSelection(image.url)}
+											onClick={() => toggleImageSelection(image.id)}
 										/>
 									)}
-									{selectedImages.includes(image.url) && (
+									{selectedImages.includes(image.id) && (
 										<div
 											className="overlay"
-											onClick={() => toggleImageSelection(image.url)}
+											onClick={() => toggleImageSelection(image.id)}
 										>
 											<span>&#10003;</span>
 										</div>
